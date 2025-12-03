@@ -1,0 +1,14 @@
+// 文件名: package.json (放在專案根目錄)
+{
+  "name": "data-scope-analyzer",
+  "version": "1.0.0",
+  "description": "Multi-functional data visualizer and analyzer.",
+  "main": "api/analyze.js",
+  "dependencies": {
+    "csv-parser": "^3.0.0",
+    "lodash": "^4.17.21"
+  },
+  "scripts": {
+    "start": "vercel dev"
+  }
+}
