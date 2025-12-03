@@ -15,6 +15,8 @@
             padding: 20px;
             display: flex;
             gap: 20px;
+            /* 修正：防止頁面內容水平溢出導致無限拉長 */
+            overflow-x: hidden;
         }
         .panel {
             background-color: #252526;
@@ -41,14 +43,27 @@
             transition: background-color 0.2s;
         }
         button:hover { background-color: #005f99; }
+        
+        /* 修正：表格溢出控制 */
         .data-table-container {
             max-height: 250px;
-            overflow: auto;
+            overflow: auto; 
+            overflow-x: auto; /* 核心：當表格過寬時顯示水平滾動條 */
             margin-bottom: 20px;
             border: 1px solid #3c3c3c;
         }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #3c3c3c; }
+        
+        table { 
+            width: 100%; 
+            border-collapse: collapse;
+            table-layout: fixed; /* 讓表格基於列寬度，防止內容推開表格 */
+        }
+        th, td { 
+            padding: 8px; 
+            text-align: left; 
+            border-bottom: 1px solid #3c3c3c; 
+            word-wrap: break-word; /* 允許文字斷行 */
+        }
         th { background-color: #3c3c3c; color: #ffffff; }
         .chart-container {
             width: 100%;
@@ -100,174 +115,5 @@
             等待數據輸入...
         </div>
 
-        <h3>銷售分佈圖 (直方圖)</h3>
+        <h3>銷售分佈圖 (分區總計)</h3>
         <div class="chart-container">
-            <canvas id="sales-distribution-chart"></canvas>
-        </div>
-        
-        <button style="margin-top: 20px;" onclick="exportData()">導出處理後數據 (JSON)</button>
-    </div>
-
-    <script>
-        // Chart.js 實例變量
-        let salesChart;
-
-        function loadExampleData() {
-            const example = 
-`Name,Sales,Region
-Alice,150,North
-Bob,220,South
-Charlie,180,North
-David,350,West
-Eve,90,East
-Frank,220,South
-Grace,110,North
-Heidi,400,West
-Ivan,100,East
-Jane,280,South`;
-            document.getElementById('data-input').value = example;
-        }
-
-        async function analyzeData() {
-            const rawData = document.getElementById('data-input').value;
-            if (!rawData.trim()) {
-                alert('請先輸入數據或載入範例數據。');
-                return;
-            }
-
-            const cleanMissing = document.getElementById('clean-missing').checked;
-            const normalizeData = document.getElementById('normalize-data').checked;
-            const sortSales = document.getElementById('sort-sales').checked;
-
-            try {
-                // 1. 向 Vercel Serverless Function 發送請求
-                // 假設您的 Python 函數部署在 /api/analyze
-                const response = await fetch('/api/analyze', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        data: rawData,
-                        clean_missing: cleanMissing,
-                        normalize_data: normalizeData,
-                        sort_sales: sortSales
-                    })
-                });
-
-                const result = await response.json();
-
-                if (!result.success) {
-                    alert(`分析失敗: ${result.message}`);
-                    return;
-                }
-
-                // 2. 處理返回的數據和統計結果
-                renderDataTable(result.processed_data);
-                renderStatistics(result.statistics);
-                renderSalesChart(result.processed_data);
-
-            } catch (error) {
-                console.error('API 調用或處理失敗:', error);
-                alert('無法連接到後端服務或處理數據時發生錯誤。');
-            }
-        }
-
-        function renderDataTable(data) {
-            const tableBody = document.getElementById('data-table').querySelector('tbody');
-            const tableHead = document.getElementById('data-table').querySelector('thead');
-
-            if (data.length === 0) {
-                tableHead.innerHTML = '<tr><th>...</th></tr>';
-                tableBody.innerHTML = '<tr><td colspan="3">沒有可顯示的數據。</td></tr>';
-                return;
-            }
-
-            const headers = Object.keys(data[0]);
-            
-            // 渲染表頭
-            tableHead.innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
-
-            // 渲染數據 (只顯示前 5 行)
-            tableBody.innerHTML = data.slice(0, 5).map(row => 
-                `<tr>${headers.map(h => `<td>${row[h]}</td>`).join('')}</tr>`
-            ).join('');
-        }
-
-        function renderStatistics(stats) {
-            let html = '<table>';
-            html += '<thead><tr><th>欄位</th><th>計數</th><th>平均值</th><th>標準差</th><th>最小值</th><th>最大值</th></tr></thead>';
-            html += '<tbody>';
-            
-            // 假設我們只關心 Sales 的統計數據
-            if (stats.Sales) {
-                const s = stats.Sales;
-                html += `<tr>
-                    <td>Sales</td>
-                    <td>${s.count.toFixed(0)}</td>
-                    <td>${s.mean.toFixed(2)}</td>
-                    <td>${s.std.toFixed(2)}</td>
-                    <td>${s.min.toFixed(2)}</td>
-                    <td>${s.max.toFixed(2)}</td>
-                </tr>`;
-            }
-            html += '</tbody></table>';
-
-            document.getElementById('statistics-output').innerHTML = html;
-        }
-
-        function renderSalesChart(data) {
-            const salesValues = data.map(row => row.Sales);
-            if (!salesValues.length) return;
-
-            // 創建簡單的直方圖數據 (這裡簡化為簡單條形圖展示)
-            const regions = Array.from(new Set(data.map(row => row.Region)));
-            const salesByRegion = regions.map(region => {
-                const regionalSales = data.filter(row => row.Region === region).map(row => row.Sales);
-                return regionalSales.reduce((a, b) => a + b, 0); // 計算該地區總銷售額
-            });
-
-            const ctx = document.getElementById('sales-distribution-chart').getContext('2d');
-            
-            if (salesChart) {
-                salesChart.destroy(); // 銷毀舊圖表
-            }
-
-            salesChart = new Chart(ctx, {
-                type: 'bar', // 使用條形圖來表示分佈
-                data: {
-                    labels: regions,
-                    datasets: [{
-                        label: '地區總銷售額',
-                        data: salesByRegion,
-                        backgroundColor: [
-                            '#5aa4df', 
-                            '#5ddc83', 
-                            '#f4d03f', 
-                            '#ff6f61'
-                        ],
-                        borderColor: '#1e1e1e',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: { beginAtZero: true, grid: { color: '#3c3c3c' }, ticks: { color: '#d4d4d4' } },
-                        x: { grid: { color: '#3c3c3c' }, ticks: { color: '#d4d4d4' } }
-                    },
-                    plugins: { legend: { labels: { color: '#d4d4d4' } } }
-                }
-            });
-        }
-
-        function exportData() {
-            // 在實際應用中，您會從後端請求完整的處理後數據，這裡為簡化僅提示
-            alert('數據導出功能待實現。您需要調用後端來獲取完整的處理後數據 JSON。');
-        }
-
-        // 頁面載入時自動載入範例數據
-        window.onload = loadExampleData;
-
-    </script>
-</body>
-</html>

@@ -2,7 +2,7 @@
 
 const csv = require('csv-parser');
 const stream = require('stream');
-const _ = require('lodash'); // 用於數據計算和處理
+const _ = require('lodash');
 
 // Vercel Serverless Function (Node.js/Express 格式)
 module.exports = async (req, res) => {
@@ -57,39 +57,41 @@ module.exports = async (req, res) => {
         // 2.2 數據標準化 (Z-Score)
         if (normalize_data && salesValues.length > 0) {
             const mean = _.mean(salesValues);
-            const std = Math.sqrt(_.sum(salesValues.map(v => Math.pow(v - mean, 2))) / salesValues.length);
+            // 計算標準差 (使用樣本標準差 N)
+            const std = Math.sqrt(_.sum(salesValues.map(v => Math.pow(v - mean, 2))) / salesValues.length); 
 
             if (std > 0) {
                 processedData = processedData.map(row => {
-                    // 計算 Z-Score，並四捨五入
                     row.Sales = _.round((row.Sales - mean) / std, 4);
                     return row;
                 });
             } else {
-                 // 標準差為 0，所有值都一樣，Z-Score 為 0
+                // 標準差為 0，所有值都一樣，Z-Score 為 0
                 processedData = processedData.map(row => { row.Sales = 0; return row; });
             }
         }
 
         // 2.3 排序
         if (sort_sales) {
-            processedData = _.sortBy(processedData, ['Sales']).reverse();
+            // lodash 的 sortBy 預設是升序，使用 reverse 變成降序
+            processedData = _.sortBy(processedData, ['Sales']).reverse(); 
         }
 
         // 3. 生成統計摘要 (模擬 Pandas describe())
         const stats = {};
-        if (salesValues.length > 0) {
-            const validSales = processedData.map(row => row.Sales).filter(v => !isNaN(v));
+        const validSales = processedData.map(row => row.Sales).filter(v => !isNaN(v));
 
-            if (validSales.length > 0) {
-                stats.Sales = {
-                    count: validSales.length,
-                    mean: _.mean(validSales),
-                    std: Math.sqrt(_.sum(validSales.map(v => Math.pow(v - _.mean(validSales), 2))) / validSales.length),
-                    min: _.min(validSales),
-                    max: _.max(validSales)
-                };
-            }
+        if (validSales.length > 0) {
+            const mean = _.mean(validSales);
+            const std = Math.sqrt(_.sum(validSales.map(v => Math.pow(v - mean, 2))) / validSales.length);
+            
+            stats.Sales = {
+                count: validSales.length,
+                mean: mean,
+                std: std,
+                min: _.min(validSales),
+                max: _.max(validSales)
+            };
         }
 
         // 4. 返回結果
