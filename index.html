@@ -17,6 +17,7 @@
             gap: 20px;
             /* 修正：防止頁面內容水平溢出導致無限拉長 */
             overflow-x: hidden;
+            min-height: 100vh; /* 確保頁面最小高度 */
         }
         .panel {
             background-color: #252526;
@@ -24,7 +25,11 @@
             border-radius: 8px;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
         }
-        #controls-panel { width: 300px; }
+        #controls-panel { 
+            width: 300px;
+            /* 確保左側面板的最小高度，防止內容過少時壓縮 */
+            min-height: 500px; 
+        }
         #analysis-panel { flex-grow: 1; }
         h2 { color: #5aa4df; border-bottom: 1px solid #3c3c3c; padding-bottom: 10px; margin-top: 0; }
         textarea, button {
@@ -117,3 +122,174 @@
 
         <h3>銷售分佈圖 (分區總計)</h3>
         <div class="chart-container">
+            <canvas id="sales-distribution-chart"></canvas>
+        </div>
+        
+        <button style="margin-top: 20px;" onclick="exportData()">導出處理後數據 (JSON)</button>
+    </div>
+
+    <script>
+        let salesChart;
+
+        function loadExampleData() {
+            const example = 
+`Name,Sales,Region
+Alice,150,North
+Bob,220,South
+Charlie,180,North
+David,350,West
+Eve,90,East
+Frank,220,South
+Grace,110,North
+Heidi,400,West
+Ivan,100,East
+Jane,280,South`;
+            document.getElementById('data-input').value = example;
+        }
+
+        async function analyzeData() {
+            const rawData = document.getElementById('data-input').value;
+            if (!rawData.trim()) {
+                alert('請先輸入數據或載入範例數據。');
+                return;
+            }
+
+            const cleanMissing = document.getElementById('clean-missing').checked;
+            const normalizeData = document.getElementById('normalize-data').checked;
+            const sortSales = document.getElementById('sort-sales').checked;
+
+            try {
+                // 1. 向 Vercel Serverless Function 發送請求
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        data: rawData,
+                        clean_missing: cleanMissing,
+                        normalize_data: normalizeData,
+                        sort_sales: sortSales
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API 響應失敗:', response.status, errorText);
+                    // 關鍵：明確提示檢查後端服務
+                    alert(`API 請求失敗，狀態碼: ${response.status}。請檢查 Vercel 運行時日誌或確認 Node.js 服務已啟動。`);
+                    return;
+                }
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    alert(`分析失敗: ${result.message}`);
+                    return;
+                }
+
+                // 2. 處理返回的數據和統計結果
+                renderDataTable(result.processed_data);
+                renderStatistics(result.statistics);
+                renderSalesChart(result.processed_data);
+
+            } catch (error) {
+                console.error('API 調用或處理失敗:', error);
+                // 顯示您遇到的彈窗訊息
+                alert('無法連接到後端服務或處理數據時發生錯誤。');
+            }
+        }
+
+        function renderDataTable(data) {
+            const tableBody = document.getElementById('data-table').querySelector('tbody');
+            const tableHead = document.getElementById('data-table').querySelector('thead');
+
+            if (data.length === 0) {
+                tableHead.innerHTML = '<tr><th>...</th></tr>';
+                tableBody.innerHTML = '<tr><td colspan="3">沒有可顯示的數據。</td></tr>';
+                return;
+            }
+
+            const headers = Object.keys(data[0]);
+            
+            // 渲染表頭
+            tableHead.innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+
+            // 渲染數據 (只顯示前 5 行)
+            tableBody.innerHTML = data.slice(0, 5).map(row => 
+                `<tr>${headers.map(h => `<td>${row[h]}</td>`).join('')}</tr>`
+            ).join('');
+        }
+
+        function renderStatistics(stats) {
+            let html = '<table style="width: 100%;"><thead><tr><th>欄位</th><th>計數</th><th>平均值</th><th>標準差</th><th>最小值</th><th>最大值</th></tr></thead><tbody>';
+            
+            if (stats.Sales) {
+                const s = stats.Sales;
+                html += `<tr>
+                    <td>Sales</td>
+                    <td>${s.count ? s.count.toFixed(0) : '0'}</td>
+                    <td>${s.mean ? s.mean.toFixed(2) : 'N/A'}</td>
+                    <td>${s.std ? s.std.toFixed(2) : 'N/A'}</td>
+                    <td>${s.min ? s.min.toFixed(2) : 'N/A'}</td>
+                    <td>${s.max ? s.max.toFixed(2) : 'N/A'}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+
+            document.getElementById('statistics-output').innerHTML = html;
+        }
+
+        function renderSalesChart(data) {
+            if (!data.length) return;
+
+            const salesMap = {};
+            data.forEach(row => {
+                const sales = parseFloat(row.Sales);
+                const region = row.Region || 'N/A';
+                if (!isNaN(sales)) {
+                    salesMap[region] = (salesMap[region] || 0) + sales;
+                }
+            });
+
+            const regions = Object.keys(salesMap);
+            const salesByRegion = regions.map(region => salesMap[region]);
+
+            const ctx = document.getElementById('sales-distribution-chart').getContext('2d');
+            
+            if (salesChart) {
+                salesChart.destroy();
+            }
+
+            salesChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: regions,
+                    datasets: [{
+                        label: '地區總銷售額',
+                        data: salesByRegion,
+                        backgroundColor: ['#5aa4df', '#5ddc83', '#f4d03f', '#ff6f61'],
+                        borderColor: '#1e1e1e',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true, grid: { color: '#3c3c3c' }, ticks: { color: '#d4d4d4' } },
+                        x: { grid: { color: '#3c3c3c' }, ticks: { color: '#d4d4d4' } }
+                    },
+                    plugins: { legend: { labels: { color: '#d4d4d4' } } }
+                }
+            });
+        }
+
+        function exportData() {
+            alert('數據導出功能待實現。');
+        }
+        
+        // 關鍵修正：確保在 DOM 載入後立即執行數據載入
+        document.addEventListener('DOMContentLoaded', loadExampleData);
+
+    </script>
+</body>
+</html>
